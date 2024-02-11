@@ -1,3 +1,3 @@
 <p align="center">
-  <img alt="BA" width="65%" src="https://github.com/HenriqueWF/PBI_BA/assets/86746927/30ffef7d-91a8-4599-ab0e-e861655d73e6">
+  <img alt="BA" width="65%" src="https://github.com/daniellalemos/Data_science-analysis/blob/main/Data%20analysis/dashboard.gif">
 </p>
