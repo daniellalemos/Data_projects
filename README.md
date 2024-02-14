@@ -10,6 +10,8 @@ This repository encompasses a range of projects and resources aimed at reinforci
 
 ## Repository Contents
 
+The repository is organized as follows:
+
 ### Machine Learning
   - Fundamental concepts of machine learning and a diverse range of projects that actively employ these concepts.
   - `Cross-validation`, `Decision trees`, `Ensemble methods`, `Gradient descent`, `Hyperparameter tuning`, `K-means clustering`, `K-Nearest Neighbors (kNN)`, `Lasso and Ridge regression`, `Linear regression`, `Logistic regression`, `Naive Bayes`, `One-hot encoding`, `Principal Component Analysis (PCA)`, `Random Forest` and `Support Vector Machines (SVM)`.
