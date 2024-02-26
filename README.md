@@ -19,9 +19,15 @@ The repository is organized as follows:
 ### Deep Learning
   - Basic fundamental concepts of deep learning.
   - Project focused on classifying handwritten digits.
+  - Project focused on classifying clothes images.
+  - Project focused on classifying customer churn.
 
 ### Data Analysis
   -  Project that gives valuable insights into a company sales using Power BI.
 
 ### SQL
   - Analyse of a movies database using SQL queries.
+
+### Statistics
+  -  Analysis of health insurance data.
+  -  Explored the influence of demographic factors on individual medical expenses charged by health insurance.
