@@ -31,3 +31,8 @@ The repository is organized as follows:
 ### Statistics
   -  Analysis of health insurance data.
   -  Explored the influence of demographic factors on individual medical expenses charged by health insurance.
+
+### ETL
+  - Data engineering project.
+  - Created an ETL pipeline. Parallelized tasks.
+  - Used airflow on AWS EC2 and AWS RDS Postgres instance database.
