@@ -1,0 +1,963 @@
+---
+title: Gene expression signature of cigarette smoking and its role in lung adenocarcinoma development and survival
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    css: tableContents.css
+    toc: yes
+    toc_float: yes
+    depth: 3
+    number_sections: yes
+    theme:  paper
+    highlight: tango
+bibliography: Referencias.bibtex
+---
+
+
+```{r setup, cache = FALSE, echo = FALSE}
+options(width = 107, digits = 4) 
+knitr::opts_chunk$set(cache = TRUE, autodep = TRUE) 
+```
+
+
+# Introduction
+<p style='text-align: justify;'>
+This work arises with the aim of developing scripts in R with the assistance of Bioconductor packages for the analysis of gene expression data. The data being analyzed come from a study related to the gene expression profile of tobacco consumption and its role in the development of lung adenocarcinoma [@landi2008gene].
+</p>
+
+<p style='text-align: justify;'>
+Lung adenocarcinoma is a common form of cancer in the lungs, found in smokers, although it can also develop in people who have never smoked. Typically, it starts in the outer tissues of the lung, remaining undetectable for long periods of time. It presents as one of the most common and deadly types of cancer. However, the molecular changes induced by tobacco consumption that lead to cancer development are not yet fully understood [@subramanian2007lung]. Therefore, studying and understanding these mechanisms is important as it will enable the identification of genes that may be associated with cancer development and, consequently, identify potential targets for future treatment.
+</p>
+
+<p style='text-align: justify;'>
+The study on which this work is based included 105 individuals with lung adenocarcinoma aged between 44 and 72 years, belonging to the Environment And Genetics in Lung cancer Etiology (EAGLE), another study focused on lung cancer in the Lombardy region of Italy. Gene expression data were obtained using HG-U133A microarrays from Affimetrix, comprising 135 samples of normal tissue (**NT**) and adenocarcinoma (**T**), from individuals who are current smokers (**C**), former smokers (**F**), and never smokers (**N**). After preprocessing by the authors, the final dataset is already normalized, totaling 107 samples, with 58 corresponding to tumor tissues and 49 to non-tumor tissues, from 20 never smokers, 26 former smokers, and 28 current smokers. The dataset used in this work is available in the GEO database of NCBI under the accession code [GDS3257](http://www.ncbi.nlm.nih.gov/sites/GDSbrowser?acc=GDS3257).
+</p>
+
+
+
+# Loading and checking the data
+<p style='text-align: justify;'>
+Required packages:
+</p>
+
+```{r installpacks, echo = FALSE, message = FALSE, warning = FALSE, include = FALSE}
+#source("http://www.bioconductor.org/biocLite.R")
+#biocLite("GEOquery")
+#biocLite("limma")
+#biocLite("hgu133a.db") #para a anotaçao dos genes
+#install.packages("caret", repos="http://cran.rstudio.com/")
+#install.packages("gtools", repos="http://cran.rstudio.com/")
+#install.packages("GOstats", repos="http://cran.rstudio.com/")
+#install.packages("MLInterfaces", repos="http://cran.rstudio.com/")
+```
+
+```{r packages, message = FALSE, warning = FALSE}
+library(Biobase)
+library(GEOquery)
+library(hgu133a.db)
+library(genefilter)
+library(limma)
+library(caret)
+library(gtools)
+library(GOstats)
+library(gplots)
+library(MLInterfaces)
+```
+
+<p style='text-align: justify;'>
+Download and loading of the dataset:
+</p>
+
+```{r dataset, message = FALSE}
+gds3257 <- getGEO('GDS3257', destdir = ".")
+```
+
+<p style='text-align: justify;'>
+Transform the dataset into an expressionset:
+</p>
+
+
+```{r expressionset, message = FALSE, warning = FALSE, dependson = "dataset"}
+eset <- GDS2eSet(gds3257)
+eset
+```
+
+## Data
+
+<p style='text-align: justify;'>
+The expressionset contains 107 samples and a total of 22283 features, corresponding to the 22283 probes present in the microarray.
+</p>
+<p style='text-align: justify;'>
+Example of expression data for the first 10 genes and the first 6 samples:
+</p>
+
+
+```{r dados, message = FALSE, warning = FALSE}
+dados = exprs(eset)
+dados[1:10,1:6]
+```
+
+<p style='text-align: justify;'>
+Making a boxplot with the base 2 logarithm of the expression data for all samples allows us to easily visualize the scale and distribution of the data. These show similar shape and positioning among samples, as they have a nearly homogeneous distribution along the horizontal line, suggesting that the expression data are already normalized, as expected and mentioned by the authors of the article.
+</p>
+
+
+```{r boxplot, fig.width = 10, fig.align = 'center',  message = FALSE, warning = FALSE}
+col = terrain.colors(length(pData(eset)$individual), alpha = 0.7)
+boxplot(log2(dados), col = col, whiskcol = col, pch = 21, cex = 0.8, xlab = 'Samples', ylab = 'Intensities (log2)', notch = TRUE, frame = FALSE)
+```
+
+
+## Metadata
+
+<p style='text-align: justify;'>
+The metadata contains 6 fields, including: *tissue*, indicating whether the sample's lung tissue is tumoral or normal, *individual*, indicating whether the individual is currently smoking, has smoked before, or has never smoked, *disease.state*, indicating the state of the tumor in the patient, and *gender*, indicating the patient's gender, among other descriptive fields.
+</p>
+
+
+```{r metadados, message = FALSE, warning = FALSE}
+vars = pData(eset)
+names(vars)
+levels(vars$tissue); levels(vars$individual); levels(vars$disease.state); levels(vars$gender)
+```
+
+<p style='text-align: justify;'>
+The following table shows the number of samples corresponding to the *tissue* and *individual* variables, making it easier to understand how many of the samples (107), i.e., their frequency, belong to each respective variable.
+</p>
+
+
+```{r varstabela, message = FALSE, warning = FALSE}
+addmargins(table(vars$tissue,vars$individual))
+```
+
+# Preprocessing
+
+<p style='text-align: justify;'>
+Check for NAs in the expressionset:
+</p>
+
+
+```{r NAs, message = FALSE, warning = FALSE}
+sum(which(is.na(dados)))
+```
+
+<p style='text-align: justify;'>
+As verified, the expressionset does not have any missing data, which aligns with the previous findings, as the dataset is already normalized.
+The 22283 features will be used in subsequent analyses, an approach also chosen by the authors [@landi2008gene]. For predictive and clustering analysis, it was decided to filter the data, reducing the number of features to make the process less computationally intensive. Genes were filtered based on whether the standard deviation of the expression values is greater than twice the median of the standard deviations of all genes:
+</p>
+
+
+```{r filtrados, message = FALSE, warning = FALSE}
+# Data filtered by standard deviation
+sds = rowSds(dados)
+m = median(sds)
+eset.f = eset[sds > 2*m]   
+```
+
+<p style='text-align: justify;'>
+Visually, this corresponds to selecting all genes whose standard deviation of expression values lies beyond the dark blue line in the histogram below:
+</p>
+
+
+```{r histograma, fig.align = 'center', message = FALSE, warning = FALSE}
+hist(sds,breaks = 50,ylim = c(0,4000),col = "lightblue",xlab = 'Standard deviation',ylab = 'Frequency',main = NULL)
+abline(v = m*2, col = "darkblue",lwd = 3,lty = 2)
+```
+
+# Differential expression and enrichment analysis
+
+<p style='text-align: justify;'>
+The following statistical analyses were performed using the *limma* package [@ritchie2015limma], which is a library used for gene expression analysis in data and microarrays, allowing the creation of linear models using a Bayesian extension, suitable for this type of studies. The genes of interest identified by these statistical analyses were subjected to an enrichment analysis to determine if there is statistically significant "enrichment" in the genes from any biologically coherent set of genes. This latter analysis was conducted using the *GOstats* package [@falcon2007using], which allows testing gene lists for association with Gene Ontology (GO) terms.
+</p>
+
+<p style='text-align: justify;'>
+In an attempt to find molecular alterations associated with tobacco consumption, a differential expression analysis was conducted between current smokers and never smokers (**C**/**N**) and former smokers and never smokers (**F**/**N**), for all tumor samples, for early tumor stages (stages I and II), and for all normal tissue samples. Priority was given to the analysis of tumor tissue samples in early stages, as the advanced state of the tumor may cause potential gene expression changes. A significance criterion was set at p-value < 0.01 and Fold Change > 1.5.
+</p>
+
+## Never smokers vs. current smokers (Tumor tissue)
+<p style='text-align: justify;'>
+Creation of the design for the linear model, defining *never smoker* as the reference:
+</p>
+
+
+```{r design1, message = FALSE, warning = FALSE}
+eset.tumor = eset[, eset$tissue == "tumor"]
+indivs1 = relevel(eset.tumor$individual, 'never smoker')
+design1 = model.matrix(~ indivs1)
+head(design1)
+```
+
+<p style='text-align: justify;'>
+Creation of linear regression models and performing statistical tests:
+</p>
+
+```{r modelo1, message = FALSE, warning = FALSE}
+fit1 = lmFit(eset.tumor, design1)
+fit.bayes1 = eBayes(fit1) 
+diff1 = topTable(fit.bayes1, coef = 2, 1000, genelist = fit1$genes$NAME)
+diff1[1:10,]
+```
+
+
+<p style='text-align: justify;'>
+According to the previous tests, we will now check for the most differentially expressed genes using the significance criterion defined earlier (p-value < 0.01 and Fold Change > 1.5):
+</p>
+
+```{r genes1, message = FALSE, warning = FALSE}
+treshold = foldchange2logratio (1.5)
+upregulated1 = diff1[which(diff1$logFC > treshold & diff1$adj.P.Val < 0.01),]
+downregulated1 = diff1[which(diff1$logFC < -treshold & diff1$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated1),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated1),hgu133aSYMBOL))
+```
+
+
+<p style='text-align: justify;'>
+Found that there are 30 overexpressed genes (in 33 probes) and 8 underexpressed genes (in 8 probes) in the tumor tissue of smoking patients compared to never smokers. Next, an enrichment analysis will be performed to try to determine the most likely biological class to which this set of genes belongs.
+</p>
+
+<p style='text-align: justify;'>
+For all enrichment analyses, a significance criterion of p-value < 0.025 was considered. The universe of genes corresponds to all genes present in the expressionset.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the overexpressed genes:**
+</p>
+
+
+```{r GOsobre1, message = FALSE, warning = FALSE}
+entrezUniverse = unlist(mget(featureNames(eset), hgu133aENTREZID))
+selectedEntrezIds1 = unlist(mget(rownames(upregulated1), hgu133aENTREZID))
+params1 = new("GOHyperGParams", geneIds = selectedEntrezIds1, universeGeneIds = entrezUniverse, 
+             annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver1 = hyperGTest(params1)
+summary(hgOver1)[1:15,]
+```
+
+<p style='text-align: justify;'>
+The previous result suggests a statistically significant "enrichment" in genes whose biological processes are related to cell division/cycle, mitotic process, and chromosome segregation, among others. Considering that one of the most evident characteristics in cancer development involves rapid and uncontrolled cell proliferation, these results are in line with expectations. In fact, among the identified genes are "TTK" (which encodes a protein essential for chromosomal alignment during mitosis [@mills1992expression]), "ECT2" (thought to play an important role in cytokinesis regulation [@tatsumoto1999human]), and "CENPF" (essential for kinetochore function and chromosomal segregation during mitosis [@liao1995cenp]), among others, reinforcing the obtained result.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the underexpressed genes:**
+</p>
+
+```{r GOsub1, message = FALSE, warning = FALSE}
+selectedEntrezIds2 = unlist(mget(rownames(downregulated1), hgu133aENTREZID))
+params2 = new("GOHyperGParams", geneIds = selectedEntrezIds2, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver2 = hyperGTest(params2)
+summary(hgOver2)[c(1:6,8:14),] #linha 7 demasiado longa
+```
+
+<p style='text-align: justify;'>
+The enrichment analysis for underexpressed genes suggests a statistically significant "enrichment" in genes whose biological processes are related to the cellular defense response and immunology. Among the identified genes are "SDC1" (which encodes a transmembrane protein responsible for mediating cell binding and signaling [@lories1992differential]) and "CIRBP" (cold-inducible, encoding a protein with a protective role in response to genotoxic stress by stabilizing transcripts involved in cell survival [@nishiyama1997cloning]), among others. These functions reinforce the result obtained in the enrichment analysis. The fact that the "SDC1" gene is underexpressed and related to cell binding also somewhat aligns with expectations, as another characteristic in cancers is metastasis, where cells can break away from the primary tumor site and travel through the bloodstream, spreading the tumor to other organs.
+</p>
+
+## Never smokers vs. former smokers (Tumor tissue)
+<p style='text-align: justify;'>
+The design used in this case is the same as in the previous case. Creation of linear regression models and performing statistical tests:
+</p>
+
+
+```{r modelo2, message = FALSE, warning = FALSE}
+fit2 = lmFit(eset.tumor, design1)
+fit.bayes2 = eBayes(fit2) 
+diff2 = topTable(fit.bayes2, coef = 3, 1000, genelist = fit2$genes$NAME)
+diff2[1:10,]
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differentially expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes2, message = FALSE, warning = FALSE}
+upregulated2 = diff2[which(diff2$logFC > treshold & diff2$adj.P.Val < 0.01),] 
+downregulated2 = diff2[which(diff2$logFC < -treshold & diff2$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated2),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated2),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We can thus verify that there are no overexpressed or underexpressed genes in tissues from former smokers compared to tissues from never smokers.
+</p>
+
+## Never smokers vs. current smokers (Tumor tissue - stages I and II)
+<p style='text-align: justify;'>
+Creation of the design for the linear model, defining *never smoker* as the reference:
+</p>
+
+
+```{r design2, message = FALSE, warning = FALSE}
+eset.stumor = eset[, eset$tissue == "tumor" & (eset$disease.state == 'stage I' | eset$disease.state == 'stage II')]
+indivs2 = relevel(eset.stumor$individual, 'never smoker')
+design2 = model.matrix(~ indivs2)
+head(design2)
+```
+
+<p style='text-align: justify;'>
+Creation of linear regression models and performing statistical tests:
+</p>
+
+
+```{r modelo3, message = FALSE, warning = FALSE}
+fit3 = lmFit(eset.stumor, design2)
+fit.bayes3 = eBayes(fit3) 
+diff3 = topTable(fit.bayes3, coef = 2, 1000, genelist = fit3$genes$NAME)
+head(diff3)
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differentially expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes3, message = FALSE, warning = FALSE}
+upregulated3 = diff3[which(diff3$logFC > treshold & diff3$adj.P.Val < 0.01),]
+downregulated3 = diff3[which(diff3$logFC < -treshold & diff3$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated3),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated3),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We found that there are 9 overexpressed genes (in 10 probes) and 9 underexpressed genes (in 9 probes) in tumor tissue of smoking patients compared to never smokers. Next, an enrichment analysis will be performed to try to determine the most likely biological class to which this set of genes belongs.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the overexpressed genes:**
+</p>
+
+
+```{r GOsobre2, message = FALSE, warning = FALSE}
+selectedEntrezIds3 = unlist(mget(rownames(upregulated3), hgu133aENTREZID))
+params3 = new("GOHyperGParams", geneIds = selectedEntrezIds3, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver3 = hyperGTest(params3)
+summary(hgOver3)[1:15,]
+```
+
+<p style='text-align: justify;'>
+The previous result suggests a statistically significant "enrichment" in genes whose biological processes are related to cell division/cycle, mitotic process, and chromosome regulation/segregation, among others. These results are indeed similar to those obtained when considering all tumor stages. Also here, the previously mentioned genes are among the most overexpressed, whose function relates to the obtained result. However, when considering only the early tumor stages (stages I and II), the number of overexpressed genes decreases, which may be related to the fact that the advanced state of the tumor (not considered here) could cause potential changes in gene expression.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the underexpressed genes:**
+</p>
+
+
+```{r GOsub2, message = FALSE, warning = FALSE}
+selectedEntrezIds4 = unlist(mget(rownames(downregulated3), hgu133aENTREZID))
+params4 = new("GOHyperGParams", geneIds = selectedEntrezIds4, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver4 = hyperGTest(params4)
+summary(hgOver4)[1:15,] #linhas demasiado longas
+```
+
+<p style='text-align: justify;'>
+The enrichment analysis for underexpressed genes suggests a statistically significant "enrichment" in genes whose biological processes are related to distribution/localization/polarization of rafts in the plasma membrane, regulation of macromitophagy (a specialized form of autophagy by which mitochondria are selectively degraded and recycled), and organization of the extracellular matrix. Since the extracellular matrix is composed of a set of molecules that provide structural and biochemical support to surrounding cells, some of the identified genes may be related to tumor metastasis. Another common characteristic of cancer cells is increased resistance to mitochondrial apoptosis, so it would be expected that genes positively regulating this process would be underexpressed. Among the most underexpressed genes are "ADRB2" (involved in cell adhesion process [@boulay2012loss]) and "SDC1" (involved with the extracellular matrix and cell adhesion process [@lories1992differential]), among others.
+</p>
+
+## Never smokers vs. former smokers (Tumor tissue - stages I and II)
+<p style='text-align: justify;'>
+The design used in this case is the same as in the previous case. Creation of linear regression models and performing statistical tests:
+</p>
+
+
+```{r modelo4, message = FALSE, warning = FALSE}
+fit4 = lmFit(eset.stumor, design2)
+fit.bayes4 = eBayes(fit4) 
+diff4 = topTable(fit.bayes4, coef = 3, 1000, genelist = fit4$genes$NAME)
+head(diff4)
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differently expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes4, message = FALSE, warning = FALSE}
+upregulated4 = diff4[which(diff4$logFC > treshold & diff4$adj.P.Val < 0.01),] 
+downregulated4 = diff4[which(diff4$logFC < -treshold & diff4$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated4),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated4),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We can verify that there are no overexpressed or underexpressed genes in tissues from former smokers compared to tissues from never smokers.
+</p>
+
+## Never smokers vs. current smokers (Normal tissue)
+<p style='text-align: justify;'>
+Creation of the design for the linear model, defining *never smoker* as the reference:
+</p>
+
+
+```{r design3, message = FALSE, warning = FALSE}
+eset.normal = eset[, eset$tissue == "normal"]
+indivs3 = relevel(eset.normal$individual, 'never smoker')
+design3 = model.matrix(~ indivs3)
+head(design3)
+```
+
+<p style='text-align: justify;'>
+Creation of linear regression models and performing statistical tests:
+</p>
+
+```{r modelo5, message = FALSE, warning = FALSE}
+fit5 = lmFit(eset.normal, design3)
+fit.bayes5 = eBayes(fit5) 
+diff5 = topTable(fit.bayes5, coef = 2, 1000, genelist = fit5$genes$NAME)
+head(diff5)
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differently expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes5, message = FALSE, warning = FALSE}
+upregulated5 = diff5[which(diff5$logFC > treshold & diff5$adj.P.Val < 0.01),]
+downregulated5 = diff5[which(diff5$logFC < -treshold & diff5$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated5),hgu133aSYMBOL)) 
+unlist(mget(rownames(downregulated5),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We found that there are 7 overexpressed genes (in 9 probes) and 11 underexpressed genes (in 11 probes) in normal tissue of smoking patients compared to never smokers. Next, an enrichment analysis will be performed to try to determine the most likely biological class to which this set of genes belongs.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the overexpressed genes:**
+</p>
+
+
+```{r GOsobre3, message = FALSE, warning = FALSE}
+selectedEntrezIds5 = unlist(mget(rownames(upregulated5), hgu133aENTREZID))
+params5 = new("GOHyperGParams", geneIds = selectedEntrezIds5, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver5 = hyperGTest(params5)
+summary(hgOver5)[c(1:12,14:15),] #linha 13 demasiado longa
+```
+
+<p style='text-align: justify;'>
+The previous result suggests a statistically significant "enrichment" in genes whose biological processes are related to cellular defense and immune response. Among the most overexpressed genes, as expected, is "CYP1B1," a gene known to be induced by tobacco consumption [@lampe2004signatures], and whose encoded enzyme metabolizes procarcinogens, chemicals that become carcinogens after metabolism.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the underexpressed genes:**
+</p>
+
+
+```{r GOsub3, message = FALSE, warning = FALSE}
+selectedEntrezIds6 = unlist(mget(rownames(downregulated5), hgu133aENTREZID))
+params6 = new("GOHyperGParams", geneIds = selectedEntrezIds6, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver6 = hyperGTest(params6)
+summary(hgOver6)[c(1:4,6:15),-4] 
+```
+
+<p style='text-align: justify;'>
+The enrichment analysis for underexpressed genes suggests a statistically significant "enrichment" in genes whose biological processes are related to metabolic processes and, interestingly, with morphogenesis/development of the mammary gland. Although this study is on lung adenocarcinoma, it is still interesting to note that in normal tissue of smokers, there is differential expression in genes related to the morphogenesis/development of the mammary gland, as tobacco consumption is thought to be related to the onset of breast cancer [@catsburg2014active]. However, this may just be a coincidence. Among the most underexpressed genes are "DPT," "ARHGEF4," and "NUAK1," all related to the process of cell adhesion [@superti1993complementary; @thiesen2000isolation; @hou2011new].
+</p>
+
+## Never smokers vs. former smokers (Normal tissue)
+<p style='text-align: justify;'>
+The design used in this case is the same as in the previous case. Creation of linear regression models and performing statistical tests:
+</p>
+
+```{r modelo6, message = FALSE, warning = FALSE}
+fit6 = lmFit(eset.normal, design3)
+fit.bayes6 = eBayes(fit6) 
+diff6 = topTable(fit.bayes6, coef = 3, 1000, genelist = fit6$genes$NAME)
+head(diff6)
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differently expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes6, message = FALSE, warning = FALSE}
+upregulated6 = diff6[which(diff6$logFC > treshold & diff6$adj.P.Val < 0.01),] 
+downregulated6 = diff6[which(diff6$logFC < -treshold & diff6$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated6),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated6),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We found that there are 3 overexpressed genes (in 3 probes) and 1 underexpressed gene (in 2 probes) in normal tissue of former smoking patients compared to never smokers. Next, an enrichment analysis will be performed to try to determine the most likely biological class to which this set of genes belongs.
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the overexpressed genes:**
+</p>
+
+
+```{r GOsobre4, message = FALSE, warning = FALSE}
+selectedEntrezIds7 = unlist(mget(rownames(upregulated6), hgu133aENTREZID))
+params7 = new("GOHyperGParams", geneIds = selectedEntrezIds7, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver7 = hyperGTest(params7)
+summary(hgOver7)[1:15,]
+```
+
+<p style='text-align: justify;'>
+The previous result suggests a statistically significant "enrichment" in genes whose biological processes are related to cellular defense and immune response ("KDM5D" [@rezvani2008characterizing],"DDX3Y" [@rosinski2008ddx3y]), peptide and histone biosynthesis and processing ("RPS4Y1", [@andres2008rps4y]).
+</p>
+
+<p style='text-align: justify;'>
+**Enrichment analysis for the underexpressed genes:**
+</p>
+
+
+```{r GOsub4, message = FALSE, warning = FALSE, error = 4}
+selectedEntrezIds8 = unlist(mget(rownames(downregulated6), hgu133aENTREZID))
+params8 = new("GOHyperGParams", geneIds = selectedEntrezIds8, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver8 = hyperGTest(params8)
+```
+
+<p style='text-align: justify;'>
+As we can see, this analysis cannot be performed because the gene being tested, "XIST," does not have any corresponding GO term. This gene is involved in the inactivation of one copy of the X chromosome in female mammals.
+</p>
+
+## Former smokers vs. current smokers (Tumor tissue - stages I and II)
+<p style='text-align: justify;'>
+To investigate whether the pattern observed between current smokers/never smokers is also observed for former smokers, a gene expression analysis was performed between current smokers and former smokers in early-stage tumor tissues.
+</p>
+
+<p style='text-align: justify;'>
+Creation of the design for the linear model (*current smoker* as the reference):
+</p>
+
+```{r design4, message = FALSE, warning = FALSE}
+design4 = model.matrix(~ eset.stumor$individual)
+head(design4)
+```
+
+<p style='text-align: justify;'>
+Creation of linear regression models and performing statistical tests:
+</p>
+
+
+```{r modelo7, message = FALSE, warning = FALSE}
+fit7 = lmFit(eset.stumor, design4)
+fit.bayes7 = eBayes(fit7) 
+diff7 = topTable(fit.bayes7, coef = 2, 1000, genelist = fit7$genes$NAME)
+head(diff7) 
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differently expressed genes using the significance criterion defined earlier:
+</p>
+
+```{r genes7, message = FALSE, warning = FALSE}
+upregulated7 = diff7[which(diff7$logFC > treshold & diff7$adj.P.Val < 0.01),]
+downregulated7 = diff7[which(diff7$logFC < -treshold & diff7$adj.P.Val < 0.01),]
+unlist(mget(rownames(upregulated7),hgu133aSYMBOL))
+unlist(mget(rownames(downregulated7),hgu133aSYMBOL))
+```
+
+<p style='text-align: justify;'>
+We found that there are no differentially expressed genes between former smokers and current smokers. This may indicate that although the patients had quit smoking some time ago, the gene-level changes remained.
+</p>
+
+## Summary table of differential expression analysis
+<p style='text-align: justify;'>
+The following table summarizes the number of genes identified during the previous differential expression analyses:
+</p>
+
+|     Tissue    |     Tumor    |              | Tumor (Stages I e II) |      |    Normal     |              |
+----------------|--------------|--------------|---------------|--------------|---------------|--------------|
+**Condition**   |**24C vs 16N**|**18F vs 16N**|**20C vs 10N** |**13F vs 10N**|**16C vs 15N** |**18F vs 15N**|
+**Over Genes**  |      30      |      0       |     9         |      0       |       7       |       3      |
+**Over Probes** |      33      |      0       |     10        |      0       |       9       |       3      |
+**Und Genes**   |      8       |      0       |     9         |      0       |       11      |       1      |
+**Und Probes**  |      8       |      0       |     9         |      0       |       11      |       2      |
+|               |              |              |               |              |               |              |
+
+
+
+Table 1: Number of probes and genes (overexpressed and underexpressed) differentiating current smokers (**C**) from never smokers (**N**) and former smokers (**F**) from never smokers in all tumor samples, tumor samples in stage I or II, and normal tissue samples. The significance criterion for analysis was set as p-value < 0.01 and Fold Change > 1.5.
+
+## Normal tissue vs. tumor tissue
+<p style='text-align: justify;'>
+A differential expression analysis was also conducted between samples from normal tissue vs. tumor tissue in order to obtain an overall view of gene expression in the two tissues regardless of the patient's profile.
+</p>
+
+<p style='text-align: justify;'>
+Creation of the design for the linear model (*normal* as the reference):
+</p>
+
+
+```{r design5, message = FALSE, warning = FALSE}
+design5 = model.matrix(~ eset$tissue)
+head(design5)
+```
+
+<p style='text-align: justify;'>
+Creation of linear regression models and performing statistical tests:
+</p>
+
+
+```{r modelo8, message = FALSE, warning = FALSE}
+fit8 = lmFit(eset, design5)
+fit.bayes8 = eBayes(fit8) 
+diff8 = topTable(fit.bayes8, coef = 2, 1000, genelist = fit8$genes$NAME)
+head(diff8) 
+```
+
+<p style='text-align: justify;'>
+According to the previous tests, check for the most differently expressed genes using the significance criterion defined earlier:
+</p>
+
+
+```{r genes8, message = FALSE, warning = FALSE}
+upregulated8 = diff8[which(diff8$logFC > treshold & diff8$adj.P.Val < 0.01),]
+downregulated8 = diff8[which(diff8$logFC < -treshold & diff8$adj.P.Val < 0.01),]
+length(unlist(mget(rownames(upregulated8),hgu133aSYMBOL))) #número sondas
+length(unique(unlist(mget(rownames(upregulated8),hgu133aSYMBOL)))) #número genes
+length(unlist(mget(rownames(downregulated8),hgu133aSYMBOL)))
+length(unique(unlist(mget(rownames(downregulated8),hgu133aSYMBOL))))
+```
+
+<p style='text-align: justify;'>
+Due to the high number of genes in the result, we chose to present the total number of genes instead of the gene list itself. We found that, for the defined significance criterion, there are 230 overexpressed genes (in 284 probes) and 488 underexpressed genes (in 636 probes) in tumor tissue compared to normal tissue. Next, an enrichment analysis will be performed to try to determine the most likely biological class in which this set of genes fits.
+</p>
+
+<p style='text-align: justify;'>
+<strong>An enrichment analysis for overexpressed genes:</strong>
+</p>
+
+
+```{r GOsobre5, message = FALSE, warning = FALSE}
+selectedEntrezIds9 = unlist(mget(rownames(upregulated8), hgu133aENTREZID))
+params9 = new("GOHyperGParams", geneIds = selectedEntrezIds9, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver9 = hyperGTest(params9)
+summary(hgOver9)[1:15,]
+```
+
+<p style='text-align: justify;'>
+The previous result indicates a statistically significant "enrichment" in genes whose biological processes are related to cell division, mitotic cycle, and sugar catabolic processes. This aligns with the expected outcomes as mentioned earlier. The overexpression of genes related to sugar catabolism is consistent with the fact that cancer cells alter their metabolism to achieve faster proliferation.
+</p>
+
+<p style='text-align: justify;'>
+<strong>An enrichment analysis for underexpressed genes:</strong>
+</p>
+
+
+```{r GOsub5, message = FALSE, warning = FALSE}
+selectedEntrezIds10 = unlist(mget(rownames(downregulated8), hgu133aENTREZID))
+params10 = new("GOHyperGParams", geneIds = selectedEntrezIds10, universeGeneIds = entrezUniverse, 
+              annotation = "hgu133a.db", ontology = "BP", pvalueCutoff = 0.025, testDirection = "over")
+hgOver10 = hyperGTest(params10)
+summary(hgOver10)[1:15,]
+```
+
+<p style='text-align: justify;'>
+A hierarchical clustering analysis was performed on the previously filtered expression set data to understand if there is a clear clustering among samples based on expression values. The distance between clusters was calculated using the average linkage method, and the distance matrix was calculated using the one minus the Pearson correlation formula, which was also chosen by the authors of this study.
+</p>
+
+<p style='text-align: justify;'>
+Hierarchical clustering with distance matrix calculation (using filtered data):
+</p>
+
+```{r distmat, message = FALSE, warning = FALSE}
+corPDist = as.dist(1 - cor(exprs(eset.f), method = "pearson"))
+cl.hier = hclust (corPDist, method = "average")
+```
+
+<p style='text-align: justify;'>
+In order to apply colors to the clustering result for better visualization, the following auxiliary function was created:
+</p>
+
+```{r auxfun, message = FALSE, warning = FALSE}
+clusMember = cutree(cl.hier, 2)
+labelCol = c('lightblue', 'darkblue')
+
+colLab <- function(n) {
+  if (is.leaf(n)) {
+    a <- attributes(n)
+    labCol <- labelCol[clusMember[which(names(clusMember) == a$label)]]
+    attr(n, "nodePar") <- c(a$nodePar, lab.col = labCol)
+  }
+  n
+}
+```
+
+<p style='text-align: justify;'>
+The result of the hierarchical clustering analysis can then be visualized by creating a plot, with colors indicating the tissue type associated with each sample (tumor or normal tissue):
+</p>
+
+
+```{r hclust, fig.align = 'center', fig.width = 10, message = FALSE, warning = FALSE}
+clusDendro = dendrapply(as.dendrogram(cl.hier), colLab)
+par(cex = 0.6); plot(clusDendro, axes = F, ylim = c(0, 0.35))
+par(cex = 0.9); title(xlab="Samples", ylab="Distances", main = NULL); axis(2)
+legend('topright', c('Tumoral tissue', 'Normal tissue'), fill = c('lightblue', 'darkblue'), bty = "n")
+```
+
+<p style = 'text-align: justify;'>
+Analyzing the graph, it is observed the formation of two evident clusters, with samples from tumoral tissue and normal tissue in different branches of the tree. This means that genes from tumoral tissue generally present a closer level of expression among themselves than in relation to genes from normal tissue. This is consistent with expectations, as adenocarcinoma presents its own characteristics that depend on the overexpression of some genes (related to cell multiplication, mitosis, etc.) and underexpression of others (related to cell adhesion, mitophagy, etc.), thus showing differences in expression between the two tissues.
+</p>
+
+<p style = 'text-align: justify;'>
+Next, a clustering analysis was performed for both samples, similar to what was done, and for probes, that is, applying clustering to both columns and rows. Thus, two auxiliary functions were defined, one for calculating the distance matrix and another for clustering, necessary for creating the heatmap.
+</p>
+
+<p style = 'text-align: justify;'>
+Auxiliary function for calculating the distance matrix:
+</p>
+
+```{r funcDist, message = FALSE, warning = FALSE}
+dist.fun = function(x) {
+  return (as.dist (1 - cor(t (x), method = "pearson")))
+}
+```
+
+<p style = 'text-align: justify;'>
+Auxiliary function for performing hierarchical clustering:
+</p>
+
+```{r funcClust, message = FALSE, warning = FALSE}
+clust.fun = function (x) {
+  return (hclust (x, method = "average"))
+}
+```
+
+<p style = 'text-align: justify;'>
+Another function was also defined in order to be applied in the heatmap to associate a color with each type of tissue, namely dark blue for samples of tumor tissue and light blue for samples of normal tissue.
+</p>
+
+
+```{r clustCol, message = FALSE, warning = FALSE}
+color.map.tissue <- function(tissue) { if (tissue == "tumor") "lightblue" else "darkblue" }
+tissuecolors <- unlist(lapply(eset.f$tissue, color.map.tissue))
+```
+
+<p style = 'text-align: justify;'>
+Defining all these functions beforehand, the heatmap can then be created:
+</p>
+
+
+```{r heatmap, fig.align = 'center', fig.width = 9, fig.height = 7, message = FALSE, warning = FALSE}
+heatmap.2(exprs(eset.f), col = colorRampPalette(c("steelblue1", "seashell1", "darkgreen")), scale = "none", 
+          ColSideColors = tissuecolors, key = TRUE, symkey = FALSE, density.info = "none", trace = "none", 
+          cexRow = 0.5, distfun = dist.fun, hclustfun = clust.fun, labRow = F, margins = c(6,16), 
+          ylab = "Sondas", xlab = "Amostras")
+
+legend('topright', c("Normal tissue","Tumoral tissue"), bty = "n", fill = c("lightblue", "darkblue"))
+```
+
+<p style = 'text-align: justify;'>
+According to the heatmap result, we observe a clear separation of gene expression between samples from tumoral tissue and normal tissue. Furthermore, within the same type of tissue, the formation of two gene groups is observed, belonging to different branches of the clustering tree, with one group being more underexpressed than the other. In tumoral tissue, we observe a greater underexpression of genes compared to genes present in normal tissue, mainly in the group of genes from the upper cluster. On the other hand, there are also more underexpressed genes in tumoral tissue compared to normal tissue, although fewer, a result that is consistent with the gene expression analysis between the two tissues previously performed (227 overexpressed genes versus 481 underexpressed genes in tumoral tissue). From the previous analyses, we know that the overexpressed genes in tumoral tissue are involved in the processes of cell division, mitosis, and sugar catabolism, and the underexpressed genes are involved in the mechanism of angiogenesis.
+</p>
+
+# Dimensionality Reduction
+
+
+```{r pca, message = FALSE, warning = FALSE}
+smokers.data <- dados
+smokers.data.t = t(smokers.data)
+pca_smokers = prcomp(smokers.data.t, scale = T)
+summary(pca_smokers)
+min(which(summary(pca_smokers)$importance[c("Cumulative Proportion"),] > 0.9))
+```
+
+It was possible to verify how many essential genes exist to explain the variability of the data. In this study, only 62 genes explain 90% of the data variability. PC1 + PC2 explain only about 30%.
+ 
+ 
+```{r pca_plot, message = FALSE, warning = FALSE}
+plot(pca_smokers$x, col = vars$tissue , pch = 19)
+legend(150,100,legend=levels(vars$tissue), col = 1:6, pch=19)
+plot(pca_smokers$x, col = vars$individual , pch = 19)
+legend(120,100,legend=levels(vars$individual), col = 1:6, pch=19)
+plot(pca_smokers$x, col = vars$disease.state , pch = 19)
+legend(110,100,legend=levels(vars$disease.state), col = 1:6, pch=19)
+```
+<p style = 'text-align: justify;'>
+From these plot scores it is possible to verify that for the tissue the samples are not correlated as they are distant from each other, for the rest there is a slight correlation between the samples. The expression data for the tissues are different.
+</p>
+
+
+# Predictive Analysis
+
+<p style = 'text-align: justify;'>
+A predictive analysis was conducted to predict both the type of tissue (tumor/normal) and the individual's profile (current/former or never smoker). For this purpose, the *MLInterfaces* package [@MLInterfaces2016] was used, which provides a standard way of parameterization and presentation of results for learning algorithms. In the analysis, the machine learning methods of k-nearest neighbors, regression trees, and support vector machines (SVMs) were used, using the cross-validation method that allows the use of all available data. The number of iterations for cross-validation was set to 10.
+</p>
+
+
+## K-nearest Neighbors
+
+### Tissue Type Prediction
+
+<p style = 'text-align: justify;'>
+Model construction and results:
+</p>
+
+
+```{r knn1, message = FALSE, warning = FALSE}
+knnResult.tissue.cv <- MLearn(tissue ~ ., eset.f, knnI(k = 1), xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(knnResult.tissue.cv))
+```
+
+
+<p style = 'text-align: justify;'>
+Model accuracy for tissue type prediction:
+</p>
+
+
+```{r pecc1, message = FALSE, warning = FALSE}
+precision(confuMat(knnResult.tissue.cv))
+```
+
+**Prediction of Individual Profile**
+
+<p style = 'text-align: justify;'>
+Construction of the model and results:
+</p>
+
+
+```{r knn2, message = FALSE, warning = FALSE}
+knnResult.indivs.cv <- MLearn(individual ~ ., eset.f, knnI(k = 1), xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(knnResult.indivs.cv))
+```
+
+Model Accuracy for Predicting Individual Profile:
+
+<p style = 'text-align: justify;'>
+Accuracy of the model for predicting individual profile:
+</p>
+
+
+```{r pecc2, message = FALSE, warning = FALSE}
+precision(confuMat(knnResult.indivs.cv))
+```
+
+
+## Regression Trees
+
+**Tissue Type Prediction**
+
+<p style = 'text-align: justify;'>
+Model construction and results:
+</p>
+
+
+```{r arv1, message = FALSE, warning = FALSE}
+treeResult.tissue.cv <- MLearn(tissue ~ ., eset.f, rpartI, xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(treeResult.tissue.cv))
+```
+
+<p style = 'text-align: justify;'>
+Model Accuracy for Tissue Type Prediction:
+</p>
+
+```{r pecc3, message = FALSE, warning = FALSE}
+precision(confuMat(treeResult.tissue.cv))
+```
+
+**Individual profile prediction**
+
+<p style = 'text-align: justify;'>
+Model construction and results:
+</p>
+
+```{r arv2, message = FALSE, warning = FALSE}
+treeResult.indivs.cv <- MLearn(individual ~ ., eset.f, rpartI, xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(treeResult.indivs.cv))
+```
+
+<p style = 'text-align: justify;'>
+Model accuracy for predicting individual profile:
+</p>
+
+```{r pecc4, message = FALSE, warning = FALSE}
+precision(confuMat(treeResult.indivs.cv))
+```
+
+## Support Vector Machines (SVMs)
+
+**Fabric type forecast**
+
+<p style = 'text-align: justify;'>
+Model construction and results:
+</p>
+
+```{r svm1, message = FALSE, warning = FALSE}
+svmResult.tissue.cv <- MLearn(tissue ~ ., eset.f, svmI , xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(svmResult.tissue.cv))
+```
+
+<p style = 'text-align: justify;'>
+Model accuracy for tissue type prediction:
+</p>
+
+```{r pecc5, message = FALSE, warning = FALSE}
+precision(confuMat(svmResult.tissue.cv))
+```
+
+**Individual profile prediction**
+
+<p style = 'text-align: justify;'>
+Model construction and results:
+</p>
+
+```{r svm2, message = FALSE, warning = FALSE}
+svmResult.indivs.cv <- MLearn(individual ~ ., eset.f, svmI , xvalSpec("LOG", 10, balKfold.xvspec(10)))
+addmargins(confuMat(svmResult.indivs.cv))
+```
+
+<p style = 'text-align: justify;'>
+Model accuracy for predicting individual profile:
+</p>
+
+```{r pecc6, message = FALSE, warning = FALSE}
+precision(confuMat(svmResult.indivs.cv))
+```
+
+<p style = 'text-align: justify;'>
+In general, the 3 types of models used, k-nearest neighbors, regression trees and SVMs, present a good level of accuracy in predicting the type of tissue associated with each sample, with the k-nearest neighbors method being better. close with an accuracy level of 97.96% for normal tissue samples and 100% for tumor tissue samples. As we saw in the clustering analysis, there is a clear separation between the two tissue types, which could make the prediction process easier, as we see here.
+</p>
+
+<p style = 'text-align: justify;'>
+On the other hand, the level of precision drops considerably when it comes to predicting the profile of the individual associated with each sample, with the precision levels of the three models for this situation being around or below 50% (with the exception of the precision of the model of SVM for current smokers, with 75%). In this case we have one more variable to predict than in the previous case, which makes the prediction process even more complicated. Furthermore, this difference in the prediction between tissues and the individual's profile is due to the fact that the difference in expression is evident between cancerous and normal cells (genes related to cell cycle, mitosis, immunology, etc.) and this difference is not so evident when what is at stake is whether or not the individual consumes tobacco.
+</p>
+
+
+# Conclusions
+
+<p style = 'text-align: justify;'>
+Differential expression analysis in 107 samples of tumor tissue and normal tissue from current, former and never-smoking patients demonstrated that there are changes at the genetic level caused by tobacco consumption. In fact, in samples from smokers there was a higher expression of genes related to the cell division/cycle process, mitosis process and chromosome segregation in the analysis with all tumor stages or just the first stages (e.g. “TTK” , “ECT2”, “CENPF”). This result is consistent with the fact that cancer cells present a high level of cellular proliferation and is in line with the result obtained by the authors of this study:
+</p>
+
+> "We found that smoking induces deregulation of this very mitotic process (...) comprises genes that regulate the mitotic spindle formation (...) such as CENPF. (...) TTK (linked to cell mitosis through EGFR,a critical drug target for lung adenocarcinoma."
+
+<p style = 'text-align: justify;'>
+Samples from smokers showed lower expression of genes related to the cellular defense response process and immunology in tumor tissue (e.g. “SDC1” and “CIRBP”). In normal tissue this trend is reversed, with this type of genes being overexpressed, including the “CYP1B1” gene, which encodes an enzyme capable of metabolizing procarcinogens. This result is also in line with the results obtained by the authors:
+</p>
+
+> "In the non-tumor tissue, current smoking strongly altered immune response genes, consistent with the defense mechanisms of the lung tissue against the acute toxic effects of smoking. (...) Our results are consistent with some previous findings, such as smoking-related alteration of CYP1B1"
+
+<p style = 'text-align: justify;'>
+An analysis of genetic expression between former smokers and current smokers demonstrated that, for the defined significance criterion, there are no differentially expressed genes, which may indicate that although the patients had already stopped smoking some time ago, changes in the expression level of genes remained.
+</p>
+
+<p style = 'text-align: justify;'>
+Another analysis of differential expression between samples from normal tissue and tumor tissue demonstrated that there are more underexpressed genes and fewer overexpressed genes in tumor tissue, a result also evident by the hierarchical clustering analysis, with a clear separation between samples from tumor and normal tissue. . From the enrichment analysis it appears that there is a statistically significant “enrichment” in genes whose biological processes are related to cell division, mitotic cycle and sugar catabolic processes, which is in line with what is expected since cancer cells evolve in order to alter their metabolism in order to achieve faster proliferation.
+</p>
+
+<p style = 'text-align: justify;'>
+Regarding underexpressed genes, there is a statistically significant “enrichment” in genes whose biological processes are related to the development of the cardiovascular/circulatory system, morphogenesis and development of blood vessels. As mentioned, although it may seem contradictory in relation to what is known about cancer, particularly with regard to the increase in the angiogenesis mechanism, it is known that in some types of cancer the angiogenesis mechanism is not that relevant and is, in in many cases, reduced, so lung adenocarcinoma could be one of these cases.
+</p>
+
+<p style = 'text-align: justify;'>
+After carrying out a predictive analysis using the k-nearest neighbors, regression trees and SVMs methods, it is concluded that the methods present very good accuracy when it comes to predicting the tissue associated with each sample, with the k-neighbors method being better at predicting closest with an accuracy level of 97.96% for normal tissue samples and 100% for tumor tissue samples. However, for predicting the profile of the individual associated with each sample, this is not the case, with the accuracy levels of the three models for this situation being around or below 50% (with the exception of the accuracy of the SVM model for current smokers, with 75%), which could be due to the existence of a clear separation between the genes expressed in the two types of tissue, as verified in the clustering analysis, which will not be so evident when it comes to distinguishing between the profiles of individuals .
+</p>
+
+# References
+
+
