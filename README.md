@@ -23,16 +23,16 @@ The repository is organized as follows:
   - Project focused on classifying customer churn.
 
 ### Data Analysis
-  -  Project that gives valuable insights into a company sales using Power BI.
+  -  Project that gives valuable insights into a company's sales using Power BI.
 
 ### SQL
   - Analyse of a movies database using SQL queries.
 
 ### Statistics
-  -  Analysis of health insurance data.
-  -  Explored the influence of demographic factors on individual medical expenses charged by health insurance.
+  -  Project: Analysis of health insurance data.
+  -  Project: Gene expression signature of cigarette smoking and its role in lung adenocarcinoma development and survival.
 
 ### ETL
   - Data engineering project.
-  - Created an ETL pipeline. Parallelized tasks.
-  - Used airflow on AWS EC2 and AWS RDS Postgres instance database.
+    - Created an ETL pipeline. Parallelized tasks.
+    - Used airflow on AWS EC2 and AWS RDS Postgres instance database.
