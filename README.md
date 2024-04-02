@@ -36,3 +36,9 @@ The repository is organized as follows:
   - Data engineering project.
     - Created an ETL pipeline. Parallelized tasks.
     - Used airflow on AWS EC2 and AWS RDS Postgres instance database.
+   
+### MongoDB
+- MongoDB Data Management and Analysis Script
+    - Database Interaction: Python script connects to MongoDB, performs schema validation, inserts data, and executes queries.
+    - Schema Validation: Defines rules for 'book' and 'author' collections, ensuring data consistency.
+    - Query Functions: Enables retrieval of specific book titles, author-book relationships, and book count per author, supporting basic data analysis.
